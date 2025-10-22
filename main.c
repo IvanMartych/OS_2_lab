@@ -1,36 +1,44 @@
+#define _POSIX_C_SOURCE 200809L  // Для rand_r() и gettimeofday()
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 
 int successful_rounds = 0; // колчиство совпадений 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+
+// Используется вместо rand_r() для совместимости с MSYS2/MinGW
+static inline unsigned int my_rand(unsigned int* seed) {
+    *seed = *seed * 1103515245 + 12345;
+    return (*seed / 65536) % 32768;
+}
+
 // функция которая определяет совпадение в одной колоде 
-int simulate_round() {
-    int deck[52];
+// ОПТИМИЗИРОВАННАЯ версия: не нужно тасовать всю колоду!
+int simulate_round(unsigned int* seed) {
+    // Выбираем две случайные карты из колоды
+    // Первая карта - любая из 52
+    int first_card = my_rand(seed) % 52;
     
-    // Заполняем колоду: 0-12 - пики, 13-25 - червы, 26-38 - бубны, 39-51 - трефы
-    // Значение карты = номер % 13 (0-12 соответствует 2,3,4,...,Туз)
-    for (int i = 0; i < 52; i++) {
-        deck[i] = i;
+    // Вторая карта - любая из оставшихся 51
+    int second_card_index = my_rand(seed) % 51;
+    
+    // Если индекс >= первой карты, сдвигаем на 1 (чтобы не выбрать ту же карту)
+    int second_card = second_card_index;
+    if (second_card >= first_card) {
+        second_card++;
     }
     
-    // тусовка колоды
-    for (int i = 0; i < 52; i++) {
-        int j = rand() % 52;
-        int temp = deck[i];
-        deck[i] = deck[j];
-        deck[j] = temp;
-    }
+    // Проверяем, одинаковы ли карты по ЗНАЧЕНИЮ (масть не важна)
+    int value1 = first_card % 13;
+    int value2 = second_card % 13;
     
-    // Проверяем, одинаковы ли две ВЕРХНИЕ карты по ЗНАЧЕНИЮ
-    int top_card1 = deck[0] % 13;
-    int top_card2 = deck[1] % 13;
-    
-    return (top_card1 == top_card2);
+    return (value1 == value2);
 }
 
 // Функция, которую выполняет каждый поток
@@ -40,11 +48,11 @@ void* thread_work(void* arg) {
     int thread_id = data[1];
     int local_success = 0;
     
-    // Уникальный seed для каждого потока
-    unsigned int seed = time(NULL) + thread_id;
+    // Уникальный seed для каждого потока (ПОТОКОБЕЗОПАСНЫЙ)
+    unsigned int seed = time(NULL) + thread_id * 1000 + pthread_self();
     
     for (int i = 0; i < rounds; i++) {
-        if (simulate_round()) {
+        if (simulate_round(&seed)) {  // ИСПРАВЛЕНО: передаем seed
             local_success++;
         }
     }
@@ -99,8 +107,9 @@ int main(int argc, char* argv[]) {
     pthread_t threads[num_threads];
     int thread_data[num_threads][2]; // [0] - rounds, [1] - thread_id
     
-    // Замеряем время начала
-    clock_t start_time = clock();
+    // Замеряем РЕАЛЬНОЕ время начала (не CPU время!)
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
     
     // Запускаем потоки
     for (int i = 0; i < num_threads; i++) {
@@ -129,9 +138,10 @@ int main(int argc, char* argv[]) {
         pthread_join(threads[i], NULL);
     }
     
-    // Замеряем время окончания
-    clock_t end_time = clock();
-    double execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    // Замеряем РЕАЛЬНОЕ время окончания
+    gettimeofday(&end_time, NULL);
+    double execution_time = (end_time.tv_sec - start_time.tv_sec) + 
+                           (end_time.tv_usec - start_time.tv_usec) / 1000000.0;
     
     // Вычисляем вероятность
     double probability = (double)successful_rounds / total_rounds;
