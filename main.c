@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L  // Для rand_r() и gettimeofday()
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -19,7 +17,6 @@ static inline unsigned int my_rand(unsigned int* seed) {
 }
 
 // функция которая определяет совпадение в одной колоде 
-// ОПТИМИЗИРОВАННАЯ версия: не нужно тасовать всю колоду!
 int simulate_round(unsigned int* seed) {
     // Выбираем две случайные карты из колоды
     // Первая карта - любая из 52
@@ -41,23 +38,23 @@ int simulate_round(unsigned int* seed) {
     return (value1 == value2);
 }
 
-// Функция, которую выполняет каждый поток
+// функция, которую выполняет каждый поток
 void* thread_work(void* arg) {
     int* data = (int*)arg;
     int rounds = data[0];
     int thread_id = data[1];
     int local_success = 0;
     
-    // Уникальный seed для каждого потока (ПОТОКОБЕЗОПАСНЫЙ)
+    // Уникальный seed для каждого потока 
     unsigned int seed = time(NULL) + thread_id * 1000 + pthread_self();
     
     for (int i = 0; i < rounds; i++) {
-        if (simulate_round(&seed)) {  // ИСПРАВЛЕНО: передаем seed
+        if (simulate_round(&seed)) {  
             local_success++;
         }
     }
     
-    // Безопасно добавляем результаты к общему счетчику
+    // безопасно добавляем результаты к общему счетчику
     pthread_mutex_lock(&mutex);
     successful_rounds += local_success;
     pthread_mutex_unlock(&mutex);
@@ -89,9 +86,6 @@ int main(int argc, char* argv[]) {
     printf("Количество потоков: %d\n", num_threads);
 
     
-    // Инициализация генератора случайных чисел
-    srand(time(NULL));
-    
     // Рассчитываем, сколько раундов выполнит каждый поток
     int rounds_per_thread = total_rounds / num_threads;
     int extra_rounds = total_rounds % num_threads;
@@ -107,16 +101,16 @@ int main(int argc, char* argv[]) {
     pthread_t threads[num_threads];
     int thread_data[num_threads][2]; // [0] - rounds, [1] - thread_id
     
-    // Замеряем РЕАЛЬНОЕ время начала (не CPU время!)
+
     struct timeval start_time, end_time;
-    gettimeofday(&start_time, NULL);
+    gettimeofday(&start_time, NULL); // NULL - часовой пояс
     
     // Запускаем потоки
     for (int i = 0; i < num_threads; i++) {
         thread_data[i][0] = rounds_per_thread;
         thread_data[i][1] = i;
         
-        // Первые несколько потоков получают дополнительные раунды
+        // дополнительные раунды
         if (i < extra_rounds) {
             thread_data[i][0]++;
         }
